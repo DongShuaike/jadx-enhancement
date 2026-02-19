@@ -36,7 +36,7 @@ flowchart LR
 
 - Java 11+
 - `jadx` / `jadx-gui` 命令可用
-- 可打开 GUI；无桌面可用 `xvfb-run`
+- 可打开 GUI；无桌面可用 `xvfb-run` 或纯 CLI launcher
 
 客户端：
 
@@ -87,16 +87,26 @@ export JADX_AI_MCP_PORT=8650
 export JADX_AI_MCP_REMOTE_MODE=true
 ```
 
-然后启动 `jadx-gui`：
+方式 A（有桌面会话）：
 
 ```bash
 jadx-gui /path/to/app.apk
 ```
 
-无桌面环境：
+方式 B（Linux 无桌面）：
 
 ```bash
 xvfb-run -a jadx-gui /path/to/app.apk
+```
+
+方式 C（纯 CLI 常驻，不依赖桌面）：
+
+```bash
+java -cp "<path-to-jadx>/lib/jadx-dev-all.jar:/path/to/jadx-ai-mcp.jar" \
+  com.zin.jadxaimcp.cli.HeadlessServerLauncher \
+  --port 8650 \
+  --remote-mode true \
+  /path/to/app.apk
 ```
 
 日志中会打印一次性 token（仅显示一次），形如：
@@ -110,6 +120,7 @@ Use Authorization header: Bearer <TOKEN>
 
 - `JADX_AI_MCP_REMOTE_MODE` 默认就是 `true`
 - 默认监听：`127.0.0.1:8650`
+- `jadx`/`jadx-cli` 标准入口会在任务后强制退出，不适合做长期 MCP 服务；无桌面场景建议用上面的 `HeadlessServerLauncher`
 
 ---
 
@@ -221,4 +232,3 @@ uv run jadx_mcp_server.py --jadx-url http://127.0.0.1:8650
 - 插件编译排查：`/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-ai-mcp/BUILD_TROUBLESHOOTING.md`
 - 插件项目：`/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-ai-mcp`
 - 本地 MCP 项目：`/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-mcp-server`
-
