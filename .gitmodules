@@ -1,0 +1,8 @@
+[submodule "jadx-mcp-server"]
+	path = jadx-mcp-server
+	url = git@github.com:DongShuaike/jadx-mcp-server.git
+	branch = main
+[submodule "jadx-ai-mcp"]
+	path = jadx-ai-mcp
+	url = git@github.com:DongShuaike/jadx-ai-mcp.git
+	branch = jadx-ai
