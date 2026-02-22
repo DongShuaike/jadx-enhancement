@@ -1,85 +1,42 @@
-# JADX 云端 + 本地 MCP 工作流（按真实使用场景）
+# JADX Cloud + Local MCP 工作流
 
-本仓库包含两个项目：
+这个仓库是一个 **组合工程**，包含两个子项目：
 
-- `jadx-ai-mcp/`：运行在云端 `jadx-gui` 内的插件（Java）
-- `jadx-mcp-server/`：运行在客户端本机的 MCP Server（Python）
+- `jadx-ai-mcp/`：云端 JADX 插件（Java）
+- `jadx-mcp-server/`：本地 MCP 桥接服务（Python）
 
-你描述的真实链路是：
+## 文档分工（避免重复）
 
-1. 客户端运行 Claude Code Agent，连接本地 MCP Server  
-2. 云端通过命令行安装 `jadx-ai-mcp` 插件并开放端口  
-3. 客户端本地 MCP Server 连接云端插件  
-4. Agent 通过本地 MCP 调用 JADX 能力
+- 本 README：
+  - 只讲端到端工作流
+  - 只讲跨项目决策（端口、隧道、token、MCP scope）
+- `jadx-ai-mcp/README.md`：
+  - 只讲云端插件如何构建、安装、启动（GUI / headless）
+  - 只讲插件端能力边界（headless 支持/不支持）
+- `jadx-mcp-server/README.md`：
+  - 只讲本地 MCP 如何连接云端插件
+  - 只讲 Claude Code MCP 配置与冲突处理
 
----
-
-## 1. 架构图（对应真实工作流）
+## 真实工作流
 
 ```mermaid
 flowchart LR
-  A["Claude Code Agent (Client)"] -->|MCP| B["Local jadx-mcp-server (Client)"]
-  B -->|HTTP + Bearer Token| C["jadx-ai-mcp Plugin (Cloud)"]
-  C --> D["jadx-gui + APK Project (Cloud)"]
+  A["Claude Code Agent"] -->|MCP| B["Local jadx-mcp-server"]
+  B -->|HTTP + Bearer Token| C["Cloud jadx-ai-mcp plugin"]
+  C --> D["APK loaded in JADX"]
 ```
 
-推荐网络方式（只有 IP、无固定域名时）：
+## 快速开始（最短路径）
 
-- 优先：`SSH Tunnel + Token`
-- 备选：直接 `http://<cloud-ip>:<port> + Token`（不推荐公网裸露）
-
----
-
-## 2. 一次性前置条件
-
-云端：
-
-- Java 11+
-- `jadx` / `jadx-gui` 命令可用
-- 可打开 GUI；无桌面可用 `xvfb-run` 或纯 CLI launcher
-
-客户端：
-
-- Python 3.10+
-- `uv` 可用
-- Claude Code 可配置本地 MCP
-
----
-
-## 3. 步骤一：云端安装 `jadx-ai-mcp` 插件（命令行）
-
-### 方式 A：安装发布版（推荐，最快）
+### 1) 云端安装插件
 
 ```bash
 jadx plugins --install "github:zinja-coder:jadx-ai-mcp"
 ```
 
-说明：
+如果需要本地构建版，见：`jadx-ai-mcp/README.md`。
 
-- 这是从 GitHub 发布产物安装，不是本地编译产物。
-- 安装后重启 `jadx-gui` 生效。
-
-### 方式 B：安装你本地构建的 jar
-
-在仓库构建：
-
-```bash
-cd /Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-ai-mcp
-mvn -DskipTests package
-```
-
-安装构建产物：
-
-```bash
-JAR_PATH=$(ls -t target/*.jar | head -n 1)
-jadx plugins --install-jar "$JAR_PATH"
-```
-
----
-
-## 4. 步骤二：云端启动插件并拿到 token
-
-先设置（无 GUI 菜单操作场景）：
+### 2) 云端启动插件（推荐 headless 常驻）
 
 ```bash
 export JADX_AI_MCP_HOST=127.0.0.1
@@ -87,148 +44,100 @@ export JADX_AI_MCP_PORT=8650
 export JADX_AI_MCP_REMOTE_MODE=true
 ```
 
-方式 A（有桌面会话）：
+无桌面环境时，使用 headless launcher：
 
 ```bash
-jadx-gui /path/to/app.apk
-```
-
-方式 B（Linux 无桌面）：
-
-```bash
-xvfb-run -a jadx-gui /path/to/app.apk
-```
-
-方式 C（纯 CLI 常驻，不依赖桌面）：
-
-```bash
-java -cp "<path-to-jadx>/lib/jadx-dev-all.jar:/path/to/jadx-ai-mcp.jar" \
+java -cp "<jadx-all-jar>:<jadx-ai-mcp-jar>" \
   com.zin.jadxaimcp.cli.HeadlessServerLauncher \
   --port 8650 \
   --remote-mode true \
   /path/to/app.apk
 ```
 
-日志中会打印一次性 token（仅显示一次），形如：
+日志会输出一次性 token：
 
 ```text
 One-time token (shown once): <TOKEN>
 Use Authorization header: Bearer <TOKEN>
 ```
 
-注意：
-
-- `JADX_AI_MCP_REMOTE_MODE` 默认就是 `true`
-- 默认监听：`127.0.0.1:8650`
-- `jadx`/`jadx-cli` 标准入口会在任务后强制退出，不适合做长期 MCP 服务；无桌面场景建议用上面的 `HeadlessServerLauncher`
-
----
-
-## 5. 步骤三：客户端本地 MCP Server 连接云端插件
-
-进入本地 MCP 项目：
+### 3) 客户端建立隧道（推荐）
 
 ```bash
-cd /Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-mcp-server
-```
-
-### 方案 A（推荐）：SSH 隧道（只有 IP 无域名时首选）
-
-先开隧道：
-
-```bash
-ssh -N -L 8650:127.0.0.1:8650 user@<cloud-ip>
-```
-
-再启动本地 MCP Server（指向本地转发端口）：
-
-```bash
-uv run jadx_mcp_server.py --jadx-url http://127.0.0.1:8650 --token <ONE_TIME_TOKEN>
-```
-
-### 方案 B：直接连云端 IP 端口（不推荐公网）
-
-```bash
-uv run jadx_mcp_server.py --jadx-url http://<cloud-ip>:8650 --token <ONE_TIME_TOKEN>
-```
-
-也可用环境变量传 token：
-
-```bash
-export JADX_AUTH_TOKEN=<ONE_TIME_TOKEN>
-uv run jadx_mcp_server.py --jadx-url http://127.0.0.1:8650
-```
-
----
-
-## 6. 步骤四：Claude Code Agent 连接本地 MCP Server
-
-在 Claude Code 的 MCP 配置中添加一个 server，核心是启动命令：
-
-```json
-{
-  "mcpServers": {
-    "jadx-mcp-server": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-mcp-server",
-        "run",
-        "jadx_mcp_server.py",
-        "--jadx-url",
-        "http://127.0.0.1:8650",
-        "--token",
-        "<ONE_TIME_TOKEN>"
-      ]
-    }
-  }
-}
+ssh -f -N -L 18650:127.0.0.1:8650 user@<cloud-ip>
 ```
 
 说明：
 
-- 如果使用 SSH 隧道，`--jadx-url` 保持 `http://127.0.0.1:8650`
-- 如果直连云端 IP，改为 `http://<cloud-ip>:8650`
+- `-N` 只做端口转发
+- 不加 `-f` 时会前台阻塞，这是正常现象
+- 使用 `18650` 避免和本地已有 `8650` 冲突
+
+### 4) 本地启动 MCP server
+
+```bash
+uv run jadx_mcp_server.py \
+  --jadx-url http://127.0.0.1:18650 \
+  --token-file ~/.secrets/jadx_cloud.token
+```
+
+> 建议用 `--token-file`，避免把 token 写进全局环境变量影响其他会话。
 
 ---
 
-## 7. 快速验收（4 个检查点）
+## 已验证的关键结论
 
-1. 云端 `jadx-gui` 已打开 APK，插件已启动  
-2. 云端日志里拿到 token  
-3. 本地 `jadx_mcp_server.py` 进程正常运行  
-4. Claude Code 能看到并调用 JADX 相关 MCP tools
-
-可用一句测试：
-
-- `List all available JADX MCP tools`
+- `jadx` / `jadx-cli` 标准入口会退出，不适合做常驻 MCP 后端。
+- 无桌面云机（含 macOS 无 GUI 会话）推荐 `HeadlessServerLauncher`。
+- 开启 remote mode 后，`/health` 也需要 Bearer token。
+- headless 下可做“按类/方法/资源查询”，但不支持“当前 GUI 选中类/文本”、重命名、debugger。
 
 ---
 
-## 8. 常见故障
+## 常见问题（本次排障沉淀）
 
-`401 Unauthorized`
+### Q1. `ssh -N -L ...` 执行后终端像卡住
 
-- token 输入错误
-- token 过期（重新启动插件或旋转 token）
-- 本地 MCP 启动时未传 `--token` 且未设置 `JADX_AUTH_TOKEN`
+正常。它在前台保活隧道。要后台运行请加 `-f`。
 
-`Connection refused / timeout`
+### Q2. `/health` 出现 Unauthorized
 
-- 云端插件未启动
-- 端口不一致
-- SSH 隧道未建立或已断开
-- 云端安全组/防火墙未放行（直连场景）
+remote mode 开启时必须带 token。否则返回 401。
 
-看不到工具
+### Q3. `jadx-gui` 在无桌面环境报 `HeadlessException`
 
-- Claude Code MCP 配置未生效
-- 本地 MCP Server 没有真正启动成功
+这是预期限制。请改用：
+
+- Linux：`xvfb-run -a jadx-gui ...`（若仍需要 GUI）
+- 通用：`HeadlessServerLauncher`（推荐）
+
+### Q4. Claude `/mcp` 显示 `No MCP servers configured`
+
+常见原因是 **MCP 注册在其他项目 scope**。在当前项目目录执行：
+
+```bash
+claude mcp add -s local jadx-cloud -- uv --directory /path/to/jadx-mcp-server run jadx_mcp_server.py --jadx-url http://127.0.0.1:18650 --token-file ~/.secrets/jadx_cloud.token
+```
+
+再执行：
+
+```bash
+claude mcp list
+```
+
+### Q5. 我已经配置了但 `/mcp` 还是看不到
+
+优先检查：
+
+- 当前工作目录是否正确
+- `claude mcp list` 在该目录是否能看到 server
+- 是否存在旧 server 名称（如 `jadx-mcp`）冲突
+- 是否需要重启 Claude Code 刷新会话缓存
 
 ---
 
-## 9. 相关文档
+## 详细文档入口
 
-- 插件编译排查：`/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-ai-mcp/BUILD_TROUBLESHOOTING.md`
-- 插件项目：`/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-ai-mcp`
-- 本地 MCP 项目：`/Users/dsk/Dev/AI_era_2026/jadx_enhancement/jadx-mcp-server`
+- 云端插件：`jadx-ai-mcp/README.md`
+- 本地桥接：`jadx-mcp-server/README.md`
+- 插件构建排障：`jadx-ai-mcp/BUILD_TROUBLESHOOTING.md`
